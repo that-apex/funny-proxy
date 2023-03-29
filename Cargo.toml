@@ -1,0 +1,10 @@
+[package]
+name = "funny-proxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+lazy_static = "1.4.0"
+uuid = { version = "1.3.0", features = ["v4"] }
+base64 = "0.21.0"
