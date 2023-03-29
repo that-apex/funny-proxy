@@ -1,11 +1,9 @@
 use std::error::Error;
-use std::fmt::format;
-use std::io;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use base64::Engine;
 
-use tokio::io::AsyncWriteExt;
+use base64::Engine;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use uuid::Uuid;
 
@@ -56,23 +54,19 @@ impl Connection {
     }
 
     async fn try_read(&mut self) -> Result<(), ConnectionError> {
-        match self.stream.readable().await {
-            Err(e) => return Err(ConnectionError::Other(e.into())),
-            Ok(..) => {}
+        if let Err(e) = self.stream.readable().await {
+            return Err(ConnectionError::Other(e.into()));
         }
 
-        match self.stream.try_read_buf(&mut self.temp_buffer) {
+        match self.stream.read_buf(&mut self.temp_buffer).await {
             Ok(0) => {
                 Err(ConnectionError::EndOfStream)
             }
             Ok(_n) => {
                 self.data_read().await
             }
-            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                Ok(())
-            }
             Err(e) => {
-                return Err(ConnectionError::Other(e.into()));
+                Err(ConnectionError::Other(e.into()))
             }
         }
     }
@@ -113,10 +107,10 @@ impl Connection {
         }
     }
 
-    async fn handle_packet(&mut self, mut packet: Packet) -> Result<(), ConnectionError> {
+    async fn handle_packet(&mut self, packet: Packet) -> Result<(), ConnectionError> {
         self.log(format!("received packet of type: {:?} and length {}", packet.packet_type, packet.data.len()));
 
-        let mut reader = PacketReader::create(&mut packet.data);
+        let mut reader = PacketReader::create(&packet.data);
 
         match packet.packet_type {
             PacketType::HandshakeServerboundStart => {
@@ -193,7 +187,7 @@ impl Connection {
                 packet.write_byte(0); // prev gamemode
                 packet.write_var_int(1); // dimension count
                 packet.write_string("minecraft:world"); // dimension id
-                packet.write(nbt.as_slice()).expect("failed to write nbt");
+                packet.write_all(nbt.as_slice()).expect("failed to write nbt");
 
                 packet.write_string("minecraft:world"); // spawn dimension id
                 packet.write_string("minecraft:world"); // spawn dimension name
@@ -231,7 +225,6 @@ impl Connection {
                 packet.write_float(0f32); // angle
 
                 self.send_packet(&packet).await;
-
             }
             _ => self.disconnect("Invalid packet").await
         }
@@ -242,7 +235,7 @@ impl Connection {
 
     async fn send_packet(&mut self, packet: &PacketWriter) {
         write_var_int(&mut self.stream, packet.len() as i32).await.expect("failed to write packet length");
-        self.stream.write(packet.as_ref()).await.expect("failed to write a packet");
+        self.stream.write_all(packet.as_ref()).await.expect("failed to write a packet");
     }
 
     fn log<S: AsRef<str>>(&self, str: S) {

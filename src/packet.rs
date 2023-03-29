@@ -100,8 +100,7 @@ impl Packet {
         let packet_type = Self::packet_id_to_type(packet_id, state)?;
 
         let buffer_length = (length as usize) - packet_id_size;
-        let mut buffer: Vec<u8> = Vec::with_capacity(buffer_length);
-        buffer.resize(buffer_length, 0);
+        let mut buffer: Vec<u8> = vec![0; buffer_length];
         reader.try_read_all(&mut buffer).expect("this should not happen");
 
         let packet = Packet {
@@ -299,7 +298,7 @@ impl PacketWriter {
         self.write_byte(((value >> 24) & 0xFF) as u8);
         self.write_byte(((value >> 16) & 0xFF) as u8);
         self.write_byte(((value >> 8) & 0xFF) as u8);
-        self.write_byte(((value >> 0) & 0xFF) as u8);
+        self.write_byte((value  & 0xFF) as u8);
     }
 
     pub fn write_long(&mut self, value: i64) {
@@ -313,15 +312,15 @@ impl PacketWriter {
         self.write_byte(((value >> 24) & 0xFF) as u8);
         self.write_byte(((value >> 16) & 0xFF) as u8);
         self.write_byte(((value >> 8) & 0xFF) as u8);
-        self.write_byte(((value >> 0) & 0xFF) as u8);
+        self.write_byte((value & 0xFF) as u8);
     }
 
     pub fn write_float(&mut self, value: f32) {
-        self.write(value.to_be_bytes().as_ref()).unwrap();
+        self.write_all(value.to_be_bytes().as_ref()).unwrap();
     }
 
     pub fn write_position(&mut self, x: i32, y: i16, z: i32) {
-        self.write_long((((x as i64 & 0x3FFFFFFi64) << 38) | ((z as i64 & 0x3FFFFFF) << 12) | (y as i64 & 0xFFF)))
+        self.write_long(((x as i64 & 0x3FFFFFFi64) << 38) | ((z as i64 & 0x3FFFFFF) << 12) | (y as i64 & 0xFFF))
     }
 
     pub fn write_var_int(&mut self, value: i32) {
@@ -341,7 +340,7 @@ impl PacketWriter {
 
     pub fn write_string(&mut self, str: &str) {
         self.write_var_int(str.len() as i32);
-        self.write(str.as_bytes()).unwrap();
+        self.write_all(str.as_bytes()).unwrap();
     }
 
     pub fn write_uuid(&mut self, uuid: Uuid) {
@@ -358,9 +357,6 @@ impl PacketWriter {
         self.buf.clear();
     }
 
-    pub fn to_buf(self) -> Vec<u8> {
-        self.buf
-    }
 }
 
 impl Write for PacketWriter {
@@ -386,11 +382,11 @@ pub async fn write_var_int(target: &mut (impl AsyncWrite + Unpin), value: i32) -
 
     loop {
         if (current_value & 0x7F.not()) == 0 {
-            target.write(&[current_value as u8]).await?;
+            target.write_all(&[current_value as u8]).await?;
             break;
         }
 
-        target.write(&[((current_value & 0x7F) | 0x80) as u8]).await?;
+        target.write_all(&[((current_value & 0x7F) | 0x80) as u8]).await?;
 
         current_value = (((current_value) as u32) >> 7) as i32;
     }
